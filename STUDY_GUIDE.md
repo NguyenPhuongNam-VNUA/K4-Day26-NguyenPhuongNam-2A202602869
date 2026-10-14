@@ -1,7 +1,7 @@
 # TÀI LIỆU KIẾN TRÚC & HƯỚNG DẪN HỌC TẬP CHUYÊN SÂU
 # PHÂN BIỆT FUNCTION CALLING VÀ MODEL CONTEXT PROTOCOL (MCP)
 
-> Tài liệu này được thiết kế để giúp bạn nắm bắt bản chất cốt lõi, kiến trúc hệ thống và phương pháp luận giải quyết bài toán tích hợp công cụ cho AI Agent — từ mức cơ bản đến cấp độ doanh nghiệp (Production).
+> Tài liệu này ghi lại toàn bộ kiến trúc, lý thuyết cốt lõi, phương pháp giải quyết và **nhật ký thực nghiệm chi tiết (Terminal Logs & Execution Traces)** từ các lần chạy thực tế trong repository — giúp bạn nắm bắt trọn vẹn từ bản chất đến ứng dụng Production của AI Agent.
 
 ---
 
@@ -80,9 +80,7 @@ Một hiểu lầm rất phổ biến là: *"MCP ra đời để thay thế Func
 
 ---
 
-## 3. Mổ xẻ từng Module trong Repository
-
-Repo được thiết kế theo lộ trình tiến hóa 4 bước từ cơ bản đến ứng dụng thực tế.
+## 3. Mổ xẻ Kiến trúc & Phương pháp giải quyết từng Module
 
 ---
 
@@ -109,10 +107,6 @@ Làm thế nào để Gemini biết thông tin thời tiết của Hà Nội và
    - App đọc tham số `fc.args`.
    - App tự gọi hàm Python cục bộ `get_weather(**fc.args)`.
    - App đóng gói kết quả vào `types.Part.from_function_response` và gửi ngược lại cho LLM để LLM tổng hợp câu trả lời tự nhiên bằng tiếng Việt.
-
-#### Hạn chế của cách này:
-- Schema phải viết tay rất dài dòng, nếu sửa hàm thì phải nhớ sửa schema.
-- Toàn bộ logic tool bị gắn chặt (tight coupling) vào file app. Muốn dùng lại hàm này ở một chatbot khác hoặc giao diện khác thì phải copy toàn bộ code.
 
 ---
 
@@ -215,7 +209,360 @@ Google ADK đóng vai trò là một **MCP Client cấp cao**:
 
 ---
 
-## 4. Bảng tổng hợp so sánh 4 mức độ triển khai
+## 4. Nhật ký Thực nghiệm & Phân tích Chi tiết Từng Lần Chạy (Execution Traces)
+
+Dưới đây là **chứng cứ thực nghiệm nguyên bản** được ghi lại từ quá trình chạy thực tế các script trong repository:
+
+### 4.1. Thực nghiệm Module 01: Function Calling thuần
+
+**Lệnh thực thi:**
+```bash
+cd 01-function-calling
+../.venv/bin/python weather_function_calling.py
+```
+
+**Console Output thực tế:**
+```text
+Both GOOGLE_API_KEY and GEMINI_API_KEY are set. Using GOOGLE_API_KEY.
+User: Thời tiết Hà Nội và Đà Nẵng hôm nay thế nào?
+
+  [model yêu cầu] get_weather({'city': 'Hà Nội'})
+  [app thực thi]  -> {"city": "Hà Nội", "nhiệt_độ": "29°C", "thời_tiết": "trời mưa nhẹ", "độ_ẩm": "82%", "gió": {"hướng": "Đông Nam", "tốc_độ": "12 km/h"}}
+  [model yêu cầu] get_weather({'city': 'Đà Nẵng'})
+  [app thực thi]  -> {"city": "Đà Nẵng", "nhiệt_độ": "30°C", "thời_tiết": "nhiều mây", "độ_ẩm": "78%", "gió": {"hướng": "Đông", "tốc_độ": "10 km/h"}}
+
+Trả lời: Chào bạn! Dưới đây là thông tin thời tiết hôm nay cho Hà Nội và Đà Nẵng:
+
+**Hà Nội** 🌧️:
+*   Nhiệt độ: 29°C
+*   Thời tiết: Trời mưa nhẹ
+*   Độ ẩm: 82%
+*   Gió: Đông Nam, 12 km/h
+
+👉 Lời khuyên: Hôm nay Hà Nội có mưa nhẹ, bạn nhớ mang theo ô hoặc áo mưa khi ra ngoài nhé! Độ ẩm cao có thể hơi oi bức một chút.
+
+**Đà Nẵng** ☁️:
+*   Nhiệt độ: 30°C
+*   Thời tiết: Nhiều mây
+*   Độ ẩm: 78%
+*   Gió: Đông, 10 km/h
+
+👉 Lời khuyên: Đà Nẵng hôm nay nhiều mây nhưng trời vẫn khá ấm áp. Bạn có thể mặc trang phục thoáng mát và đừng quên uống đủ nước nhé!
+
+Chúc bạn một ngày tốt lành! 😊
+```
+
+**Phân tích dưới góc nhìn hệ thống:**
+1. **Lần gọi API 1**: Client gửi câu hỏi *"Thời tiết Hà Nội và Đà Nẵng hôm nay thế nào?"* kèm schema `get_weather`. Gemini không trả lời văn bản mà trả về 2 Function Calls: một cho `Hà Nội`, một cho `Đà Nẵng`.
+2. **Thực thi trong App**: App bắt được 2 lệnh gọi này, chạy hàm Python nội bộ và in ra 2 dòng `[app thực thi]`.
+3. **Lần gọi API 2**: App đóng gói kết quả vào `types.Content(role="user", parts=function_responses)` gửi ngược lại cho model. Model nhận dữ liệu thật và tổng hợp câu trả lời tiếng Việt thân thiện kèm emoji.
+
+---
+
+### 4.2. Thực nghiệm Module 02: MCP Cơ bản qua stdio
+
+**Lệnh thực thi:**
+```bash
+cd 02-mcp-basics
+../.venv/bin/python weather_client.py
+```
+
+**Console Output thực tế:**
+```text
+Tools server cung cấp:
+  - get_weather: Lấy thời tiết hiện tại của một thành phố.
+
+call_tool get_weather(city='Hanoi'):
+  -> Hanoi: 29°C, trời mưa
+
+call_tool get_weather(city='Danang'):
+  -> Danang: 30°C, nhiều mây
+
+call_tool get_weather(city='Haiphong'):
+  -> Haiphong: 33°C, mưa rào
+```
+
+**Phân tích dưới góc nhìn hệ thống:**
+* Client không hề import hàm `get_weather` từ file server.
+* Client chỉ giao tiếp qua luồng chuẩn `sys.stdin`/`sys.stdout` của tiến trình con `python weather_server.py`.
+* Bản tin JSON-RPC trao đổi ngầm:
+  * Handshake: `{"method": "initialize", "params": {"protocolVersion": "2024-11-05"}}`
+  * Khám phá: `{"method": "tools/list"}` -> Nhận lại mảng JSON Schema tự sinh.
+  * Thực thi: `{"method": "tools/call", "params": {"name": "get_weather", "arguments": {"city": "Hanoi"}}}` -> Nhận lại kết quả text.
+
+---
+
+### 4.3. Thực nghiệm Module 03: MCP Production Patterns
+
+#### 4.3.1. Authentication (Kiểm thử cả trường hợp Thành công & Thất bại)
+
+**Trường hợp 1: Token hợp lệ**
+```bash
+# Terminal 1: Chạy Server
+cd 03-production && ../.venv/bin/python auth_server.py
+
+# Terminal 2: Chạy Client với đúng Token
+MCP_AUTH_TOKEN="dev-token-abc123" ../.venv/bin/python auth_client.py
+```
+*Output Client:*
+```text
+Tools (có auth):
+  - get_weather: Lấy thời tiết hiện tại của một thành phố.
+
+Kết quả: Hanoi: 29°C, trời mưa
+```
+*Log Server ghi nhận:*
+```text
+INFO: 127.0.0.1:53554 - "POST /mcp HTTP/1.1" 200 OK
+INFO: 127.0.0.1:53557 - "POST /mcp HTTP/1.1" 202 Accepted
+INFO: 127.0.0.1:53558 - "GET /mcp HTTP/1.1" 200 OK
+```
+
+**Trường hợp 2: Token sai hoặc không có quyền**
+```bash
+MCP_AUTH_TOKEN="wrong-token-xyz" ../.venv/bin/python auth_client.py
+```
+*Log Server lập tức từ chối và ghi nhận:*
+```text
+INFO: 127.0.0.1:53567 - "POST /mcp HTTP/1.1" 401 Unauthorized
+```
+*Client bắt Exception:*
+```text
+mcp.shared.exceptions.MCPError: Server returned an error response (401 Unauthorized)
+```
+*Ý nghĩa kiến trúc*: Tầng xác thực hoạt động độc lập ở transport HTTP, bảo vệ tài nguyên hệ thống trước khi request chạm vào bất kỳ dòng code nghiệp vụ nào của Tool.
+
+---
+
+#### 4.3.2. Tool Registry & Discovery
+
+**Lệnh thực thi:**
+```bash
+cd 03-production
+../.venv/bin/python registry_client.py
+```
+
+**Console Output thực tế:**
+```text
+=== Tool Registry ===
+
+  get_weather v1.0.0
+    Lấy thời tiết hiện tại của một thành phố
+    tags: ['weather', 'current', 'vietnam']  →  server: weather
+  get_weather_v2 v2.0.0
+    Lấy thời tiết chi tiết — JSON, hỗ trợ forecast và đơn vị đo
+    tags: ['weather', 'forecast', 'detailed', 'vietnam']  →  server: weather-v2
+  send_email v1.0.0
+    Gửi email tới một hoặc nhiều người nhận
+    tags: ['email', 'notification', 'communication']  →  server: email-service
+  query_db v1.2.0
+    Chạy truy vấn SQL trên database nội bộ
+    tags: ['database', 'sql', 'query', 'analytics']  →  server: db-gateway
+
+--- Agent cần tool có tag "weather" ---
+Tìm thấy 2 tool(s):
+  • get_weather v1.0.0 (server: weather)
+  • get_weather_v2 v2.0.0 (server: weather-v2)
+
+Best match: get_weather_v2 v2.0.0
+Kết nối tới server [weather-v2]...
+Kết quả: {"api_version": "2.0", "city": "Hanoi", "temp": 29, "units": "celsius", "condition": "trời mưa", "humidity": 82, "wind_speed_kmh": 12, "timestamp": "2026-10-14T17:45:55.356326+00:00"}
+
+--- Agent tìm tool có keyword "forecast" ---
+  • get_weather_v2: Lấy thời tiết chi tiết — JSON, hỗ trợ forecast và đơn vị đo
+```
+
+**Phân tích thuật toán Registry:**
+* Registry tìm thấy 2 công cụ có tag `weather`.
+* Thuật toán `ToolRegistry.best_match()` sử dụng `packaging.version.parse`:
+  * `v2.0.0 > v1.0.0`
+  * `v1.0.0` có cờ `deprecated: true` -> bị loại khỏi danh sách ưu tiên.
+* Agent tự động chọn `get_weather_v2`, đọc cấu hình transport của `weather-v2` và tự spawn kết nối.
+
+---
+
+#### 4.3.3. Versioning & Backward Compatibility
+
+**Lệnh thực thi:**
+```bash
+cd 03-production
+../.venv/bin/python versioned_client.py
+```
+
+**Console Output thực tế:**
+```text
+Server: weather-v2 v2.0.0
+Deprecated tools: ['get_weather']
+Migration: Chuyển từ get_weather sang get_weather_v2. Tham số 'city' giữ nguyên, thêm include_forecast và units.
+
+Tools:
+  - get_weather: [v1] Lấy thời tiết hiện tại — trả chuỗi đơn giản. Deprecated, dùng get_weather_v2.
+  - get_weather_v2: [v2] Lấy thời tiết chi tiết — JSON, hỗ trợ forecast và đơn vị đo.
+
+    Args:
+        city: Tên thành phố (ví dụ: Hanoi, Danang)
+        include_forecast: Có trả thêm dự báo 2 ngày tới không (mặc định: False)
+        units: Đơn vị nhiệt độ — "celsius" hoặc "fahrenheit" (mặc định: celsius)
+    
+
+[v1] get_weather('Hanoi'):
+  Hanoi: 29°C, trời mưa
+
+[v2] get_weather_v2('Hanoi', forecast=True):
+  {
+  "api_version": "2.0",
+  "city": "Hanoi",
+  "temp": 29,
+  "units": "celsius",
+  "condition": "trời mưa",
+  "humidity": 82,
+  "wind_speed_kmh": 12,
+  "timestamp": "2026-10-14T17:46:00.352669+00:00",
+  "forecast": [
+    {
+      "day": "tomorrow",
+      "temp": 27,
+      "condition": "mưa nhẹ"
+    },
+    {
+      "day": "day_after",
+      "temp": 31,
+      "condition": "nắng"
+    }
+  ]
+}
+```
+
+**Phân tích kỹ thuật Versioning:**
+1. Client trước khi gọi tool sẽ đọc Resource `server://info` để hiểu hiện trạng của server.
+2. Client cũ gọi `get_weather('Hanoi')` -> server vẫn phục vụ chuỗi text bình thường (không bị crash).
+3. Client mới gọi `get_weather_v2('Hanoi', forecast=True)` -> nhận cấu trúc JSON giàu thông tin có dự báo 2 ngày kế tiếp.
+
+---
+
+### 4.4. Thực nghiệm Module 04: Lab Google ADK + FastMCP Streamable HTTP
+
+#### 4.4.1. Khởi động FastMCP Server
+```bash
+cd 04-lab/mcp-server
+uv run python weather.py
+```
+*Server Output:*
+```text
+✅ MCP server initialized with Streamable HTTP transport
+🔧 Available tools: get_current_weather, get_forecast, health_check
+🚀 Starting MCP server on http://0.0.0.0:8085/mcp
+INFO: Uvicorn running on http://0.0.0.0:8085 (Press CTRL+C to quit)
+```
+
+#### 4.4.2. Chạy xác thực môi trường (`verify_setup.py`)
+```bash
+cd 04-lab/mcp-client
+uv run python verify_setup.py
+```
+*Output:*
+```text
+============================================================
+Weather Agent Setup Verification
+============================================================
+
+🔍 Checking environment configuration...
+✅ GOOGLE_API_KEY configured (AIzaSyCK3W...)
+
+🔍 Checking dependencies...
+✅ Google ADK
+✅ Google Generative AI
+✅ MCP
+✅ FastMCP
+✅ python-dotenv
+✅ httpx
+
+🔍 Checking agent structure...
+✅ weather_agent/agent.py
+✅ weather_agent/__init__.py
+
+🔍 Checking MCP server connectivity...
+✅ MCP server reachable at http://localhost:8085/mcp (HTTP 406)
+
+🔍 Checking agent import...
+✅ Agent imported successfully: weather_agent
+   Model: gemini-2.5-flash
+
+============================================================
+✅ All checks passed!
+🚀 Ready to start!
+   Run: uv run adk web
+📍 Then open: http://localhost:8000
+```
+
+#### 4.4.3. Chạy Agent với truy vấn tiếng Việt thực tế
+
+**Truy vấn 1: Thời tiết hiện tại**
+```bash
+uv run adk run weather_agent "Thời tiết ở Hà Nội hôm nay thế nào?"
+```
+*Kết quả Agent phản hồi:*
+```text
+[weather_agent]: Thời tiết hiện tại ở Hà Nội:
+
+Nhiệt độ: 28.5°C (83.3°F)
+Cảm giác như: 31.0°C (87.8°F)
+Tình trạng: Mây một phần
+Độ ẩm: 75%
+Gió: 14.0 km/h (8.7 mph) SE
+Áp suất: 1010.0 mb
+Chỉ số UV: 6.0
+Tầm nhìn: 10.0 km
+
+Cập nhật lần cuối: 2026-10-15 00:46
+```
+
+**Truy vấn 2: Dự báo thời tiết 3 ngày**
+```bash
+uv run adk run weather_agent "Cho tôi dự báo thời tiết 3 ngày tới ở Đà Nẵng"
+```
+*Kết quả Agent phản hồi:*
+```text
+[weather_agent]: Đây là dự báo thời tiết 3 ngày tới ở Đà Nẵng:
+
+**2026-10-15:**
+*   Nhiệt độ cao nhất: 26.5°C
+*   Nhiệt độ thấp nhất: 20.0°C
+*   Tình trạng: Mây rải rác
+*   Khả năng mưa: 20%
+*   Gió tối đa: 12.0 km/h
+*   Chỉ số UV: 5.0
+
+**2026-10-16:**
+*   Nhiệt độ cao nhất: 24.0°C
+*   Nhiệt độ thấp nhất: 20.0°C
+*   Tình trạng: Nắng
+*   Khả năng mưa: 10%
+*   Gió tối đa: 14.0 km/h
+*   Chỉ số UV: 5.0
+
+**2026-10-17:**
+*   Nhiệt độ cao nhất: 26.5°C
+*   Nhiệt độ thấp nhất: 20.0°C
+*   Tình trạng: Mây rải rác
+*   Khả năng mưa: 40%
+*   Gió tối đa: 12.0 km/h
+*   Chỉ số UV: 5.0
+```
+
+#### 4.4.4. Traces ghi nhận tại FastMCP Server trong phiên làm việc của ADK:
+```text
+INFO: 127.0.0.1:53588 - "POST /mcp HTTP/1.1" 200 OK      <-- Khởi tạo phiên MCP
+INFO: 127.0.0.1:53591 - "POST /mcp HTTP/1.1" 202 Accepted
+INFO: 127.0.0.1:53592 - "GET /mcp HTTP/1.1" 200 OK       <-- Kênh SSE nhận stream
+INFO: Processing request of type ListToolsRequest        <-- ADK tự động lấy danh sách tools
+INFO: Processing request of type CallToolRequest         <-- ADK tự động gọi get_current_weather
+INFO: Terminating session: DELETE /mcp HTTP/1.1 200 OK   <-- Đóng kết nối khi hoàn tất
+```
+
+---
+
+## 5. Bảng tổng hợp so sánh 4 mức độ triển khai
 
 | Đặc tính | Mức 1: Function Calling thuần | Mức 2: MCP Cơ bản (stdio) | Mức 3: MCP Production | Mức 4: Full Agentic MCP (ADK) |
 |---|---|---|---|---|
@@ -229,7 +576,7 @@ Google ADK đóng vai trò là một **MCP Client cấp cao**:
 
 ---
 
-## 5. Hướng dẫn thực hành nhanh (Quick Run)
+## 6. Hướng dẫn thực hành nhanh (Quick Run)
 
 Tất cả các phần đã được thiết lập sẵn môi trường ảo và tự động nạp API key từ file `.env`.
 
@@ -239,28 +586,7 @@ Tất cả các phần đã được thiết lập sẵn môi trường ảo và
 ```
 *Kịch bản sẽ tự động khởi động các server nền, gửi request kiểm thử 4 module và in bảng tổng kết trạng thái (PASSED/FAILED).*
 
-### 2. Chạy trải nghiệm từng thành phần:
-
-#### Chạy Function Calling thuần:
-```bash
-cd 01-function-calling
-../.venv/bin/python weather_function_calling.py
-```
-
-#### Chạy MCP stdio:
-```bash
-cd 02-mcp-basics
-../.venv/bin/python weather_client.py
-```
-
-#### Chạy Production Patterns:
-```bash
-cd 03-production
-../.venv/bin/python registry_client.py   # Test Tool Registry
-../.venv/bin/python versioned_client.py  # Test Versioning & server://info
-```
-
-#### Chạy Lab Web UI với Google ADK:
+### 2. Chạy Web Chat UI để trực tiếp thử nghiệm:
 ```bash
 # Terminal 1: Bật MCP Weather Server (port 8085)
 cd 04-lab/mcp-server
@@ -270,11 +596,11 @@ uv run python weather.py
 cd 04-lab/mcp-client
 uv run adk web
 ```
-*Truy cập trình duyệt: `http://localhost:8000`, chọn `weather_agent` và bắt đầu đặt câu hỏi.*
+*Truy cập trình duyệt: `http://localhost:8000`, chọn `weather_agent` từ menu dropdown và bắt đầu trò chuyện.*
 
 ---
 
-## 6. Checklist kinh nghiệm khi xây dựng hệ thống MCP thực tế
+## 7. Checklist kinh nghiệm thực chiến khi xây dựng hệ thống MCP
 
 1. **Thiết kế kích thước Tool (Tool Granularity)**:
    - *Không nên*: Tạo tool quá chi tiết (ví dụ: `get_temperature`, `get_humidity`, `get_wind` thành 3 tool riêng lẻ) -> Khiến LLM phải gọi 3 lần, tăng latency và chi phí token.

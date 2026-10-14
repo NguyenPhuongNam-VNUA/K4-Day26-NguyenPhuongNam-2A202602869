@@ -9,8 +9,14 @@ Cách chạy:
     python weather_function_calling.py
 """
 
+import os
+from dotenv import load_dotenv
 from google import genai
 from google.genai import types
+
+load_dotenv()
+if "GEMINI_API_KEY" not in os.environ and "GOOGLE_API_KEY" in os.environ:
+    os.environ["GEMINI_API_KEY"] = os.environ["GOOGLE_API_KEY"]
 
 client = genai.Client()
 
